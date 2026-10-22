@@ -1,0 +1,56 @@
+name: Tester et publier l'image Mercier
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Récupérer le code
+        uses: actions/checkout@v6
+
+      - name: Préparer Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Tester l'application
+        env:
+          DEBUG: '1'
+        run: |
+          python -m pip install -r requirements.txt
+          python manage.py test loyalty
+          python manage.py check
+
+      - name: Préparer l'émulation ARM64
+        uses: docker/setup-qemu-action@v4
+
+      - name: Préparer Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Se connecter à GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publier l'image Docker
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: |
+            ghcr.io/mahyar-abr/patisserie:main
+            ghcr.io/mahyar-abr/patisserie:sha-${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
