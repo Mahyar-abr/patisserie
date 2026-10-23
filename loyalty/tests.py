@@ -1,4 +1,5 @@
 import uuid
+from unittest.mock import patch
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.core import mail
@@ -68,6 +69,39 @@ class LoyaltyFlowTests(TestCase):
         user.refresh_from_db()
         self.assertTrue(user.verified)
         self.assertEqual(self.client.get(reverse('dashboard')).status_code,200)
+
+    def test_resend_logs_smtp_exception_and_warns_own_account(self):
+        user = User.objects.create_user('pending@example.com', 'a-long-test-password', verified=False)
+        self.client.force_login(user)
+        with patch('loyalty.views.send_verification', side_effect=ConnectionRefusedError('SMTP unreachable')):
+            with self.assertLogs('loyalty.views', level='ERROR') as logs:
+                response = self.client.post(reverse('resend'), {'email': user.email}, follow=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'n’a pas pu envoyer ton e-mail')
+        self.assertIn('Échec SMTP', logs.output[0])
+
+    def test_resend_keeps_generic_response_for_others(self):
+        User.objects.create_user('pending@example.com', 'a-long-test-password', verified=False)
+        with patch('loyalty.views.send_verification', side_effect=ConnectionRefusedError('SMTP unreachable')):
+            with self.assertLogs('loyalty.views', level='ERROR'):
+                response = self.client.post(reverse('resend'), {'email': 'pending@example.com'}, follow=True)
+        self.assertContains(response, 'Si un compte non confirmé existe')
+        self.assertNotContains(response, 'n’a pas pu envoyer ton e-mail')
+
+    def test_resend_authenticated_success_only_claims_smtp_acceptance(self):
+        user = User.objects.create_user('pending@example.com', 'a-long-test-password', verified=False)
+        self.client.force_login(user)
+        response = self.client.post(reverse('resend'), {'email': user.email}, follow=True)
+        self.assertContains(response, 'Le serveur de messagerie a accepté ton e-mail')
+        self.assertEqual(len(mail.outbox), 1)
+
+    def test_resend_zero_sent_is_treated_as_failure(self):
+        user = User.objects.create_user('pending@example.com', 'a-long-test-password', verified=False)
+        self.client.force_login(user)
+        with patch('loyalty.views.send_mail', return_value=0):
+            with self.assertLogs('loyalty.views', level='ERROR'):
+                response = self.client.post(reverse('resend'), {'email': user.email}, follow=True)
+        self.assertContains(response, 'n’a pas pu envoyer ton e-mail')
 
     def test_single_stamp_per_visit_and_code_form_not_reused(self):
         visit=Program.objects.create(mode='visit',threshold=4,reward='Une surprise')

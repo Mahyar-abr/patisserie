@@ -1,4 +1,4 @@
-import io, uuid
+import io, logging, uuid
 from functools import wraps
 import qrcode
 from django.conf import settings
@@ -18,6 +18,7 @@ from .forms import SignupForm, ProgramForm, SaleForm, CodeForm
 from .models import Card, Product, Program, Shop, Purchase, Reward, Claim
 from .services import open_card, credit, create_claim, redeem_claim, use_reward, cancel_purchase, BusinessError
 User=get_user_model()
+logger = logging.getLogger(__name__)
 def brand(request):
     return {'brand':'Pâtisserie Mercier','contact_email':settings.CONTACT_EMAIL,'identity':settings.BUSINESS_IDENTITY}
 def staff_required(fn):
@@ -38,20 +39,40 @@ class MercierLoginView(LoginView):
 def home(request):
     program=Program.objects.first()
     return render(request,'loyalty/home.html',{'program':program,'products':Product.objects.filter(active=True)})
-def send_verification(request,user):
-    token=signing.dumps({'uid':user.pk,'email':user.email},salt='mercier-verify')
-    url=request.build_absolute_uri(reverse('verify',args=[token]))
-    send_mail('Confirme ta carte Mercier',f'Bonjour {user.first_name or ""},\n\nPour activer ta carte, ouvre ce lien dans les 24 heures :\n{url}\n\nSi tu n’as pas demandé cette inscription, ignore ce message.',settings.DEFAULT_FROM_EMAIL,[user.email],fail_silently=False)
+def send_verification(request, user):
+    """Demander la remise du message au serveur SMTP (pas sa réception finale)."""
+    token = signing.dumps({'uid': user.pk, 'email': user.email}, salt='mercier-verify')
+    url = request.build_absolute_uri(reverse('verify', args=[token]))
+    sent_count = send_mail(
+        'Confirme ta carte Mercier',
+        f'Bonjour {user.first_name or ""},\n\n'
+        f'Pour activer ta carte, ouvre ce lien dans les 24 heures :\n{url}\n\n'
+        'Si tu n’as pas demandé cette inscription, ignore ce message.',
+        settings.DEFAULT_FROM_EMAIL,
+        [user.email],
+        fail_silently=False,
+    )
+    if sent_count != 1:
+        raise RuntimeError('Le serveur de messagerie n’a accepté aucun message.')
+
+
 def signup(request):
-    if request.user.is_authenticated: return redirect('dashboard')
-    form=SignupForm(request.POST or None)
-    if request.method=='POST' and form.is_valid():
-        user=form.save()
-        login(request,user)
-        try: send_verification(request,user); messages.success(request,'Un lien de confirmation vient de t’être envoyé.')
-        except Exception: messages.warning(request,'Ton compte a été créé, mais le courriel n’a pas pu partir. Réessaie plus tard ou contacte Mercier.')
+    if request.user.is_authenticated:
         return redirect('dashboard')
-    return render(request,'loyalty/signup.html',{'form':form})
+    form = SignupForm(request.POST or None)
+    if request.method == 'POST' and form.is_valid():
+        user = form.save()
+        login(request, user)
+        try:
+            send_verification(request, user)
+        except Exception:
+            logger.exception('Échec SMTP lors de l’inscription Mercier')
+            messages.warning(request, 'Ton compte a été créé, mais le courriel n’a pas pu partir. Réessaie plus tard ou contacte Mercier.')
+        else:
+            messages.success(request, 'Le serveur de messagerie a accepté le lien de confirmation. Vérifie aussi tes spams.')
+        return redirect('dashboard')
+    return render(request, 'loyalty/signup.html', {'form': form})
+
 def verify(request,token):
     try: data=signing.loads(token,salt='mercier-verify',max_age=86400)
     except (signing.BadSignature,signing.SignatureExpired):
@@ -61,15 +82,32 @@ def verify(request,token):
     messages.success(request,'Ton adresse est confirmée. Ta carte est active !')
     return redirect('dashboard' if request.user.pk==user.pk else 'login')
 def resend_verification(request):
-    if request.method=='POST':
-        email=request.POST.get('email','').strip().lower()
-        user=User.objects.filter(email=email,verified=False).first()
+    if request.method == 'POST':
+        email = request.POST.get('email', '').strip().lower()
+        user = User.objects.filter(email=email, verified=False).first()
+        # Seul le propriétaire connecté peut savoir si l'envoi à son compte a échoué.
+        # Pour toutes les autres adresses, garder une réponse générique anti-énumération.
+        own_account = (
+            request.user.is_authenticated
+            and request.user.email.lower() == email
+            and request.user.pk == (user.pk if user else None)
+        )
+        failed = False
         if user:
-            try: send_verification(request,user)
-            except Exception: pass
-        messages.success(request,'Si un compte non confirmé existe, un nouveau lien a été envoyé.')
-        return redirect('login')
-    return render(request,'loyalty/resend.html')
+            try:
+                send_verification(request, user)
+            except Exception:
+                failed = True
+                logger.exception('Échec SMTP lors du renvoi de confirmation Mercier')
+        if own_account and failed:
+            messages.error(request, 'Le serveur n’a pas pu envoyer ton e-mail de confirmation. Réessaie plus tard ou contacte Mercier.')
+        elif own_account:
+            messages.success(request, 'Le serveur de messagerie a accepté ton e-mail. Vérifie aussi les spams ; sa réception n’est pas garantie.')
+        else:
+            messages.success(request, 'Si un compte non confirmé existe, une demande de renvoi a été effectuée.')
+        return redirect('dashboard' if own_account else 'login')
+    return render(request, 'loyalty/resend.html')
+
 @login_required
 def dashboard(request):
     card=open_card(request.user) if request.user.verified else None
