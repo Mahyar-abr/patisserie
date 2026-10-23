@@ -99,3 +99,17 @@ class LoyaltyFlowTests(TestCase):
             self.assertEqual(self.client.get(reverse(name)).status_code,200)
         self.assertEqual(self.client.get(reverse('customer',args=[self.client_user.card_id])).status_code,200)
         self.assertEqual(self.client.get(reverse('sale',args=[self.client_user.card_id])).status_code,200)
+
+    def test_staff_navigation_and_program_mobile_entry(self):
+        self.client.force_login(self.staff)
+        response=self.client.get(reverse('staff'))
+        self.assertContains(response,'Règles de fidélité')
+        self.assertContains(response,reverse('program'))
+        response=self.client.get(reverse('program'))
+        self.assertContains(response,'1. Les tampons')
+        self.assertContains(response,'2. La récompense')
+        self.assertContains(response,'3. La durée de validité')
+
+    def test_staff_login_goes_to_workshop(self):
+        response=self.client.post(reverse('login'),{'username':'mercier@example.com','password':'a-long-test-password'})
+        self.assertRedirects(response,reverse('staff'))

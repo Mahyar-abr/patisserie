@@ -13,6 +13,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_POST
+from django.contrib.auth.views import LoginView
 from .forms import SignupForm, ProgramForm, SaleForm, CodeForm
 from .models import Card, Product, Program, Shop, Purchase, Reward, Claim
 from .services import open_card, credit, create_claim, redeem_claim, use_reward, cancel_purchase, BusinessError
@@ -26,6 +27,14 @@ def staff_required(fn):
         if not request.user.is_staff: raise Http404()
         return fn(request,*args,**kwargs)
     return wrapped
+
+class MercierLoginView(LoginView):
+    """Direct staff users to their management area after sign-in."""
+    def get_success_url(self):
+        if self.request.user.is_staff and not self.get_redirect_url():
+            return reverse('staff')
+        return super().get_success_url()
+
 def home(request):
     program=Program.objects.first()
     return render(request,'loyalty/home.html',{'program':program,'products':Product.objects.filter(active=True)})
