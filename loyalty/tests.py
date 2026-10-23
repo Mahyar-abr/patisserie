@@ -113,3 +113,17 @@ class LoyaltyFlowTests(TestCase):
     def test_staff_login_goes_to_workshop(self):
         response=self.client.post(reverse('login'),{'username':'mercier@example.com','password':'a-long-test-password'})
         self.assertRedirects(response,reverse('staff'))
+
+
+class StylingRegressionTests(TestCase):
+    def test_dessert_cocoa_styles_are_scoped_to_dessert(self):
+        # The dashboard also has a tile with class="cocoa".
+        # An unscoped .cocoa would blur and absolutely-position this tile.
+        from pathlib import Path
+        import re
+        css = (Path(__file__).resolve().parents[1] / 'static' / 'app.css').read_text(encoding='utf-8')
+        self.assertIn('.dessert .cocoa{', css)
+        self.assertIn('.dessert .cocoa:nth-child(3){', css)
+        self.assertIn('.tool-card.cocoa{', css)
+        self.assertFalse(re.search(r'(?:^|[},])\s*\.cocoa(?=[:{])', css),
+                         'Unscoped cocoa decoration would break the admin tile')
