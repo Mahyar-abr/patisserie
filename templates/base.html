@@ -1,6 +1,33 @@
 {% load static %}<!doctype html>
-<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#3f241e"><meta name="description" content="La carte de fidélité de la Pâtisserie Mercier"><title>{% block title %}Mercier • La fidélité gourmande{% endblock %}</title><link rel="stylesheet" href="{% static 'app.css' %}"><link rel="icon" href="{% static 'favicon.svg' %}" type="image/svg+xml"><script defer src="{% static 'app.js' %}"></script></head>
-<body><div class="site"><header class="topbar"><a class="logo" href="{% url 'home' %}" aria-label="Mercier, accueil"><span class="logo-mark">M<span>✦</span></span><span class="logo-name">Mercier<small>PÂTISSERIE</small></span></a><nav aria-label="Navigation principale" class="nav" id="navigation-principale">{% if user.is_authenticated %}<a href="{% url 'dashboard' %}">Ma carte</a>{% if user.is_staff %}<a class="nav-staff" href="{% url 'staff' %}">Gestion</a><a href="{% url 'customers' %}">Clients</a><a class="nav-rules" href="{% url 'program' %}">Règles de fidélité</a>{% endif %}<form class="inline" method="post" action="{% url 'logout' %}">{% csrf_token %}<button class="nav-link" type="submit">Déconnexion</button></form>{% else %}<a href="{% url 'login' %}">Connexion</a><a class="nav-pill" href="{% url 'signup' %}">Créer ma carte <span aria-hidden="true">↗</span></a>{% endif %}</nav></header>
+<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#3f241e"><meta name="description" content="La carte de fidélité de la Pâtisserie Mercier"><title>{% block title %}Mercier • La fidélité gourmande{% endblock %}</title><link rel="stylesheet" href="{% static 'app.css' %}"><link rel="stylesheet" href="{% static 'admin-v2.css' %}"><link rel="icon" href="{% static 'favicon.svg' %}" type="image/svg+xml"><script defer src="{% static 'app.js' %}"></script></head>
+<body><div class="site"><header class="topbar{% if user.is_authenticated and user.is_staff %} topbar-admin{% endif %}">
+<a class="logo" href="{% if user.is_authenticated and user.is_staff %}{% url 'staff' %}{% else %}{% url 'home' %}{% endif %}" aria-label="Mercier, accueil"><span class="logo-mark">M<span>✦</span></span><span class="logo-name">Mercier<small>PÂTISSERIE</small></span></a>
+{% if user.is_authenticated and user.is_staff %}
+<nav class="admin-navbar" aria-label="Navigation de gestion">
+  <div class="admin-desktop-links">
+    <a href="{% url 'staff' %}" {% if request.resolver_match.url_name == 'staff' %}aria-current="page"{% endif %}>Vue d’ensemble</a>
+    <a href="{% url 'customers' %}" {% if request.resolver_match.url_name == 'customers' %}aria-current="page"{% endif %}>Clients</a>
+    <a href="{% url 'rewards' %}" {% if request.resolver_match.url_name == 'rewards' %}aria-current="page"{% endif %}>Récompenses</a>
+    <a href="{% url 'program' %}" {% if request.resolver_match.url_name == 'program' %}aria-current="page"{% endif %}>Programme</a>
+    <form method="post" action="{% url 'logout' %}" class="inline">{% csrf_token %}<button type="submit" class="admin-logout">Déconnexion</button></form>
+  </div>
+  <details class="admin-mobile-menu"><summary><span aria-hidden="true">☰</span> Menu de gestion</summary>
+    <div class="admin-mobile-items">
+      <a href="{% url 'staff' %}">Vue d’ensemble</a>
+      <a href="{% url 'customers' %}">Tous les clients</a>
+      <a href="{% url 'rewards' %}">Récompenses clients</a>
+      <a href="{% url 'lookup' %}">Valider un achat</a>
+      <a href="{% url 'codes' %}">Codes d’achat</a>
+      <a href="{% url 'products' %}">Produits</a>
+      <a href="{% url 'program' %}">Règles de fidélité</a>
+      <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button type="submit">Déconnexion</button></form>
+    </div>
+  </details>
+</nav>
+{% elif user.is_authenticated %}
+<nav aria-label="Navigation principale" class="nav"><a href="{% url 'dashboard' %}">Ma carte</a><form class="inline" method="post" action="{% url 'logout' %}">{% csrf_token %}<button class="nav-link" type="submit">Déconnexion</button></form></nav>
+{% else %}<nav aria-label="Navigation principale" class="nav"><a href="{% url 'login' %}">Connexion</a><a class="nav-pill" href="{% url 'signup' %}">Créer ma carte <span aria-hidden="true">↗</span></a></nav>{% endif %}
+</header>
 {% if messages %}<div class="alerts" role="status" aria-live="polite">{% for message in messages %}<p class="alert {% if message.tags %}{{ message.tags }}{% endif %}">{{ message }}</p>{% endfor %}</div>{% endif %}
 <main id="contenu">{% block content %}{% endblock %}</main>
 <footer class="footer"><span><strong>Mercier</strong> · un petit plaisir, de grandes attentions.</span><span><a href="{% url 'privacy' %}">Données personnelles</a> <span class="footer-dot">·</span> {% now 'Y' %}</span></footer></div></body></html>

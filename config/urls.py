@@ -20,6 +20,7 @@ urlpatterns = [
  path('sante/',views.health,name='health'),
  path('atelier/',views.staff_home,name='staff'),
  path('atelier/clients/',views.customers,name='customers'),
+ path('atelier/recompenses/',views.rewards,name='rewards'),
  path('atelier/programme/',views.program,name='program'),
  path('atelier/produits/',views.products,name='products'),
  path('atelier/client/',views.lookup,name='lookup'),

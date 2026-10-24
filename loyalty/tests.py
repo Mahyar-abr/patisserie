@@ -265,3 +265,50 @@ class StaffCustomerDirectoryTests(TestCase):
         response = self.client.get(reverse('staff'))
         self.assertContains(response, reverse('customers'))
         self.assertContains(response, 'Liste des clients')
+
+
+@override_settings(DEBUG=True, EMAIL_BACKEND='django.core.mail.backends.locmem.EmailBackend')
+class StaffRewardDashboardTests(TestCase):
+    """La V2.2.2 ne modifie pas les droits client de la V2.2.1."""
+    def setUp(self):
+        self.staff = User.objects.create_superuser('staff-admin@example.com', 'a-long-test-password')
+        self.buyer = User.objects.create_user('buyer@example.com', 'a-long-test-password',
+                                             first_name='Zoé', verified=True)
+        self.pending_user = User.objects.create_user('new@example.com', 'a-long-test-password', verified=False)
+        self.product = Product.objects.create(name='Tiramisu cacao')
+        rule = Program.objects.create(mode='item', threshold=1, reward='Un dessert offert')
+        rule.products.add(self.product)
+        credit(self.buyer, {str(self.product.pk): 1}, self.staff, uuid.uuid4())
+        self.reward = Reward.objects.get(user=self.buyer)
+
+    def test_staff_only_reward_views_and_menu(self):
+        url = reverse('rewards')
+        self.assertEqual(self.client.get(url).status_code, 302)
+        self.client.force_login(self.buyer)
+        self.assertEqual(self.client.get(url).status_code, 404)
+        self.client.force_login(self.staff)
+        homepage = self.client.get(reverse('staff'))
+        self.assertContains(homepage, 'Clients récompensés')
+        self.assertContains(homepage, 'À remettre')
+        self.assertContains(homepage, 'Un dessert offert')
+        self.assertNotContains(homepage, '>Ma carte</a>')
+        rewards_page = self.client.get(url)
+        self.assertContains(rewards_page, 'buyer@example.com')
+        self.assertContains(rewards_page, 'Un dessert offert')
+
+    def test_reward_pending_then_redeemed(self):
+        self.client.force_login(self.staff)
+        self.assertEqual(self.client.get(reverse('rewards'), {'statut':'a_remettre'}).context['page'].paginator.count, 1)
+        use_reward(self.reward.pk, self.staff)
+        self.assertEqual(self.client.get(reverse('rewards'), {'statut':'a_remettre'}).context['page'].paginator.count, 0)
+        self.assertEqual(self.client.get(reverse('rewards'), {'statut':'remises'}).context['page'].paginator.count, 1)
+        self.assertContains(self.client.get(reverse('staff')), 'Déjà remises')
+
+    def test_email_confirmation_still_required(self):
+        self.client.force_login(self.staff)
+        self.assertEqual(self.client.get(reverse('sale', args=[self.pending_user.card_id])).status_code, 404)
+        with self.assertRaises(BusinessError):
+            credit(self.pending_user, {str(self.product.pk): 1}, self.staff, uuid.uuid4())
+        self.client.force_login(self.pending_user)
+        self.assertEqual(self.client.get(reverse('qr')).status_code, 404)
+        self.assertContains(self.client.get(reverse('dashboard')), 'Confirme ton e-mail')

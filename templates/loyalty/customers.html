@@ -1,36 +1,31 @@
 {% extends 'base.html' %}
 {% block title %}Clients · Atelier Mercier{% endblock %}
 {% block content %}
-<div class="page-intro"><a class="back" href="{% url 'staff' %}">← L’atelier</a>
-  <span class="eyebrow">ATELIER · COMPTES CLIENTS</span>
+<div class="page-intro admin-page-intro"><a class="back" href="{% url 'staff' %}">← Vue d’ensemble</a>
+  <span class="eyebrow">L’ATELIER / CLIENTS</span>
   <h1>Les clients <em>Mercier.</em></h1>
-  <p>Retrouve les adresses e-mail, les achats et les cartes de fidélité.</p>
+  <p>Retrouve chaque client, ses achats et sa progression en un seul endroit.</p>
 </div>
 <section class="client-directory" aria-label="Liste des clients">
   <form class="client-search" role="search" action="{% url 'customers' %}" method="get">
-    <label for="client-query">Rechercher par prénom, nom ou e-mail</label>
-    <div class="client-search-row"><input id="client-query" type="search" name="q" value="{{ query }}" maxlength="120" placeholder="Ex. camille@exemple.fr" autocomplete="off">
+    <label for="client-query">Rechercher un client</label>
+    <div class="client-search-row"><input id="client-query" type="search" name="q" value="{{ query }}" maxlength="120" placeholder="Nom ou adresse e-mail" autocomplete="off">
       <button class="button primary" type="submit">Rechercher</button>{% if query %}<a href="{% url 'customers' %}" class="button">Effacer</a>{% endif %}
     </div>
   </form>
-  <p class="client-results">{{ page.paginator.count }} client{{ page.paginator.count|pluralize }} {% if query %}trouvé{{ page.paginator.count|pluralize }}{% else %}inscrit{{ page.paginator.count|pluralize }}{% endif %}</p>
+  <div class="client-list-heading"><h2>Annuaire</h2><span>{{ page.paginator.count }} client{{ page.paginator.count|pluralize }}</span></div>
   <div class="client-cards">
     {% for client in customers %}
     <article class="client-row">
       <div class="client-row-info">
-        <h2><a href="{% url 'customer' client.card_id %}">{{ client.get_full_name|default:client.first_name|default:'Client' }}</a></h2>
-        <p class="break">{{ client.email }}</p>
-        {% if client.verified %}<span class="client-badge verified">✓ E-mail vérifié</span>{% else %}<span class="client-badge pending">! E-mail à confirmer</span>{% endif %}
+        <div class="client-identity"><span class="client-avatar" aria-hidden="true">{{ client.first_name|default:client.email|first|upper }}</span><div class="client-identity-text"><h3><a href="{% url 'customer' client.card_id %}">{{ client.get_full_name|default:client.first_name|default:'Client' }}</a></h3><p class="break">{{ client.email }}</p></div></div>
+        {% if client.verified %}<span class="client-badge verified">✓ Adresse vérifiée</span>{% else %}<span class="client-badge pending">E-mail à confirmer</span>{% endif %}
       </div>
-      <div class="client-row-activity">
-        <span><strong>{{ client.purchase_count }}</strong> achat{{ client.purchase_count|pluralize }} validé{{ client.purchase_count|pluralize }}</span>
-        <span><strong>{{ client.total_stamps }}</strong> tampon{{ client.total_stamps|pluralize }} cumulé{{ client.total_stamps|pluralize }}</span>
-        <small>{% if client.last_purchase %}Dernier achat : {{ client.last_purchase|date:'d/m/Y H:i' }}{% else %}Aucun achat enregistré{% endif %}</small>
+      <div class="client-row-activity"><div class="client-activity-stat"><strong>{{ client.purchase_count }}</strong><span>Achat{{ client.purchase_count|pluralize }}</span></div><div class="client-activity-stat"><strong>{{ client.total_stamps }}</strong><span>Tampon{{ client.total_stamps|pluralize }}</span></div>
+        <small>{% if client.last_purchase %}Dernier achat le {{ client.last_purchase|date:'d/m/Y' }}{% else %}Pas encore d’achat{% endif %}</small>
       </div>
-      <div class="client-row-actions">
-        <a class="button" href="{% url 'customer' client.card_id %}">Voir les achats →</a>
-        {% if client.verified %}<a class="button primary" href="{% url 'sale' client.card_id %}">+ Ajouter un achat</a>
-        {% else %}<span class="client-action-hint">Achat disponible après vérification de l’e-mail.</span>{% endif %}
+      <div class="client-row-actions"><a class="button" href="{% url 'customer' client.card_id %}">Fiche & achats <span aria-hidden="true">↗</span></a>
+        {% if client.verified %}<a class="button primary" href="{% url 'sale' client.card_id %}">+ Ajouter un achat</a>{% else %}<span class="client-action-hint">Achats possibles après confirmation de l’e-mail.</span>{% endif %}
       </div>
     </article>
     {% empty %}<div class="panel"><p class="empty">Aucun client trouvé. Essaie une autre recherche.</p></div>{% endfor %}

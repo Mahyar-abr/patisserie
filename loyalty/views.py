@@ -140,7 +140,39 @@ def health(request):
     return JsonResponse({'status':'ready'})
 @staff_required
 def staff_home(request):
-    return render(request,'loyalty/staff.html',{'active':Purchase.objects.filter(cancelled_at=None).count(),'pending':Reward.objects.filter(used_at=None,revoked=False).count(),'customers':User.objects.filter(is_staff=False).count(),'recent':Purchase.objects.select_related('user').order_by('-created_at')[:12],'shop':Shop.objects.get_or_create(pk=1)[0]})
+    now = timezone.now()
+    available = Reward.objects.filter(used_at__isnull=True, revoked=False, user__is_staff=False).filter(
+        Q(expires_at__isnull=True) | Q(expires_at__gt=now))
+    delivered = Reward.objects.filter(used_at__isnull=False, revoked=False, user__is_staff=False)
+    return render(request, 'loyalty/staff.html', {
+        'active': Purchase.objects.filter(cancelled_at=None).count(),
+        'pending': available.count(), 'delivered': delivered.count(),
+        'customers': User.objects.filter(is_staff=False).count(),
+        'pending_rewards': available.select_related('user').order_by('-created_at')[:5],
+        'delivered_rewards': delivered.select_related('user').order_by('-used_at')[:5],
+        'recent': Purchase.objects.select_related('user').order_by('-created_at')[:8],
+    })
+
+@staff_required
+def rewards(request):
+    # Private, paginated view of earned and redeemed loyalty rewards.
+    now = timezone.now()
+    statut = request.GET.get('statut', 'toutes')
+    if statut not in ('toutes', 'a_remettre', 'remises'):
+        statut = 'toutes'
+    available = Reward.objects.filter(used_at__isnull=True, revoked=False, user__is_staff=False).filter(
+        Q(expires_at__isnull=True) | Q(expires_at__gt=now))
+    delivered = Reward.objects.filter(used_at__isnull=False, revoked=False, user__is_staff=False)
+    rewards_qs = Reward.objects.select_related('user').filter(user__is_staff=False)
+    if statut == 'a_remettre':
+        rewards_qs = rewards_qs.filter(pk__in=available.values('pk'))
+    elif statut == 'remises':
+        rewards_qs = rewards_qs.filter(pk__in=delivered.values('pk'))
+    page = Paginator(rewards_qs.order_by('-created_at', '-pk'), 20).get_page(request.GET.get('page'))
+    return render(request, 'loyalty/rewards.html', {
+        'page': page, 'rewards': page.object_list, 'statut': statut,
+        'pending_count': available.count(), 'delivered_count': delivered.count(), 'now': now,
+    })
 @staff_required
 def customers(request):
     """Annuaire privé des clients ; aucune donnée personnelle en accès public."""
