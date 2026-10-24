@@ -19,6 +19,7 @@ urlpatterns = [
  path('confidentialite/',views.privacy,name='privacy'),
  path('sante/',views.health,name='health'),
  path('atelier/',views.staff_home,name='staff'),
+ path('atelier/clients/',views.customers,name='customers'),
  path('atelier/programme/',views.program,name='program'),
  path('atelier/produits/',views.products,name='products'),
  path('atelier/client/',views.lookup,name='lookup'),

@@ -1,1 +1,31 @@
-{% extends 'base.html' %}{% block content %}<div class="page-intro"><a class="back" href="{% url 'lookup' %}">← Chercher une autre carte</a><span class="eyebrow">CARTE CLIENT</span><h1>{{ customer.first_name|default:'Client' }} <em>chez Mercier.</em></h1><p>{{ customer.email }}</p></div><div class="customer-summary"><div><small>CARTE EN COURS</small><strong>{{ card.balance }}/{{ card.program.threshold }}</strong><span>{{ card.program.reward }}</span></div><a class="button primary" href="{% url 'sale' customer.card_id %}">Valider un achat <span>↗</span></a></div><div class="two-col"><section class="panel"><div class="panel-heading"><span class="eyebrow">À REMETTRE</span><h2>Récompenses</h2></div>{% for reward in rewards %}<div class="list-item"><span class="list-icon">✦</span><div><strong>{{ reward.label }}</strong><small>{% if reward.used_at %}Remise le {{ reward.used_at|date:'d/m/Y H:i' }}{% elif reward.expires_at and reward.expires_at <= now %}Expirée{% else %}Disponible{% if reward.expires_at %} jusqu’au {{ reward.expires_at|date:'d/m/Y' }}{% endif %}{% endif %}</small>{% if not reward.used_at and not reward.revoked %}{% if not reward.expires_at or reward.expires_at > now %}<form method="post" action="{% url 'redeem' reward.pk %}" data-confirm="Confirmer que la récompense a été remise ?">{% csrf_token %}<button class="button small" type="submit">Marquer comme remise</button></form>{% endif %}{% endif %}</div></div>{% empty %}<p class="empty">Aucune récompense pour le moment.</p>{% endfor %}</section><section class="panel"><div class="panel-heading"><span class="eyebrow">HISTORIQUE</span><h2>Achats</h2></div>{% for p in purchases %}<div class="list-item"><span class="list-icon">↗</span><div><strong>{{ p.stamps }} tampon(s){% if p.cancelled_at %} · annulé{% endif %}</strong><small>{{ p.created_at|date:'d/m/Y H:i' }} · {{ p.id }}</small>{% if not p.cancelled_at %}<form method="post" action="{% url 'cancel' p.pk %}" data-confirm="Annuler cet achat et ses récompenses non utilisées ?">{% csrf_token %}<input name="reason" required maxlength="200" placeholder="Motif de correction" aria-label="Motif de l’annulation"><button class="text-button" type="submit">Corriger cet achat</button></form>{% endif %}</div></div>{% empty %}<p class="empty">Aucun achat.</p>{% endfor %}</section></div>{% endblock %}
+{% extends 'base.html' %}
+{% block title %}Fiche client · Atelier Mercier{% endblock %}
+{% block content %}
+<div class="page-intro"><a class="back" href="{% url 'customers' %}">← Tous les clients</a>
+  <span class="eyebrow">ATELIER · FICHE CLIENT</span>
+  <h1>{{ customer.get_full_name|default:customer.first_name|default:'Client' }} <em>chez Mercier.</em></h1>
+  <p class="break">{{ customer.email }}</p>
+</div>
+{% if customer.verified %}
+<div class="customer-summary"><div><small>CARTE EN COURS</small><strong>{{ card.balance }}/{{ card.program.threshold }}</strong><span>{{ card.program.reward }}</span></div>
+  <a class="button primary" href="{% url 'sale' customer.card_id %}">+ Ajouter un achat <span>↗</span></a></div>
+{% else %}
+<div class="customer-unverified" role="status"><strong>Adresse e-mail non confirmée</strong><p>Cette fiche est consultable, mais la carte reste inactive et aucun achat ne peut être enregistré avant confirmation de l’adresse.</p></div>
+{% endif %}
+<div class="two-col">
+<section class="panel"><div class="panel-heading"><span class="eyebrow">À REMETTRE</span><h2>Récompenses</h2></div>
+{% for reward in rewards %}<div class="list-item"><span class="list-icon">✦</span><div><strong>{{ reward.label }}</strong><small>{% if reward.used_at %}Remise le {{ reward.used_at|date:'d/m/Y H:i' }}{% elif reward.expires_at and reward.expires_at <= now %}Expirée{% else %}Disponible{% if reward.expires_at %} jusqu’au {{ reward.expires_at|date:'d/m/Y' }}{% endif %}{% endif %}</small>{% if not reward.used_at and not reward.revoked %}{% if not reward.expires_at or reward.expires_at > now %}<form method="post" action="{% url 'redeem' reward.pk %}" data-confirm="Confirmer que la récompense a été remise ?">{% csrf_token %}<button class="button small" type="submit">Marquer comme remise</button></form>{% endif %}{% endif %}</div></div>
+{% empty %}<p class="empty">Aucune récompense pour le moment.</p>{% endfor %}
+</section>
+<section class="panel"><div class="panel-heading"><span class="eyebrow">HISTORIQUE · {{ purchase_count }} ACHAT{{ purchase_count|pluralize|upper }}</span><h2>Achats</h2></div>
+{% for p in purchases %}<div class="list-item"><span class="list-icon">↗</span><div class="purchase-details"><strong>{{ p.stamps }} tampon(s){% if p.cancelled_at %} · achat annulé{% endif %}</strong>
+  <small>{{ p.created_at|date:'d/m/Y H:i' }} · N° {{ p.id }}</small>
+  <ul class="purchase-lines">{% for item in p.display_lines %}<li>{{ item.quantity }} × {{ item.name }}</li>{% endfor %}</ul>
+  {% if p.cancelled_at %}<small>Annulé le {{ p.cancelled_at|date:'d/m/Y H:i' }}{% if p.cancel_reason %} · {{ p.cancel_reason }}{% endif %}</small>
+  {% else %}<form method="post" action="{% url 'cancel' p.pk %}" data-confirm="Annuler cet achat et ses récompenses non utilisées ?">{% csrf_token %}<input name="reason" required maxlength="200" placeholder="Motif de correction" aria-label="Motif de l’annulation"><button class="text-button" type="submit">Corriger cet achat</button></form>{% endif %}
+</div></div>{% empty %}<p class="empty">Aucun achat enregistré.</p>{% endfor %}
+{% if page.has_other_pages %}<nav class="pager" aria-label="Pages des achats">
+  {% if page.has_previous %}<a class="button" href="?page={{ page.previous_page_number }}">← Précédent</a>{% endif %}<span>Page {{ page.number }} sur {{ page.paginator.num_pages }}</span>{% if page.has_next %}<a class="button" href="?page={{ page.next_page_number }}">Suivant →</a>{% endif %}
+</nav>{% endif %}
+</section></div>
+{% endblock %}

@@ -8,6 +8,9 @@ from django.contrib.auth.decorators import login_required
 from django.core import signing
 from django.core.mail import send_mail
 from django.db import connection
+from django.db.models import Count, Max, Q, Sum
+from django.db.models.functions import Coalesce
+from django.core.paginator import Paginator
 from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -139,6 +142,23 @@ def health(request):
 def staff_home(request):
     return render(request,'loyalty/staff.html',{'active':Purchase.objects.filter(cancelled_at=None).count(),'pending':Reward.objects.filter(used_at=None,revoked=False).count(),'customers':User.objects.filter(is_staff=False).count(),'recent':Purchase.objects.select_related('user').order_by('-created_at')[:12],'shop':Shop.objects.get_or_create(pk=1)[0]})
 @staff_required
+def customers(request):
+    """Annuaire privé des clients ; aucune donnée personnelle en accès public."""
+    query = request.GET.get('q', '').strip()[:120]
+    qs = User.objects.filter(is_staff=False)
+    if query:
+        qs = qs.filter(Q(email__icontains=query) | Q(first_name__icontains=query) | Q(last_name__icontains=query))
+    qs = qs.annotate(
+        purchase_count=Count('purchase', filter=Q(purchase__cancelled_at__isnull=True)),
+        total_stamps=Coalesce(Sum('purchase__stamps', filter=Q(purchase__cancelled_at__isnull=True)), 0),
+        last_purchase=Max('purchase__created_at', filter=Q(purchase__cancelled_at__isnull=True)),
+    ).order_by('-date_joined', '-pk')
+    page = Paginator(qs, 15).get_page(request.GET.get('page'))
+    return render(request, 'loyalty/customers.html', {
+        'page': page, 'customers': page.object_list, 'query': query,
+    })
+
+@staff_required
 def program(request):
     shop=Shop.objects.get_or_create(pk=1)[0]
     current=Program.objects.first()
@@ -177,14 +197,29 @@ def lookup(request):
         if not user:
             try: user=User.objects.filter(card_id=uuid.UUID(q)).first()
             except ValueError: pass
-        if user and user.verified: return redirect('customer',card_id=user.card_id)
-        messages.error(request,'Carte introuvable ou adresse non confirmée.')
+        if user and not user.is_staff: return redirect('customer',card_id=user.card_id)
+        messages.error(request,'Client introuvable.')
     return render(request,'loyalty/lookup.html')
 @staff_required
 def customer(request,card_id):
-    user=get_object_or_404(User,card_id=card_id,verified=True)
-    card=open_card(user)
-    return render(request,'loyalty/customer.html',{'customer':user,'card':card,'rewards':Reward.objects.filter(user=user,revoked=False).order_by('-id'),'purchases':Purchase.objects.filter(user=user).order_by('-created_at')[:20],'now':timezone.now()})
+    # La fiche d'un compte non vérifié reste consultable par le staff, mais
+    # elle n'ouvre aucune carte et ne permet aucune validation d'achat.
+    user=get_object_or_404(User,card_id=card_id,is_staff=False)
+    card=open_card(user) if user.verified else None
+    history = Purchase.objects.filter(user=user).order_by('-created_at', '-pk')
+    page = Paginator(history, 15).get_page(request.GET.get('page'))
+    product_names = dict(Product.objects.values_list('pk', 'name'))
+    for purchase in page.object_list:
+        purchase.display_lines = [
+            {'name': product_names.get(int(product_pk), f'Produit nº {product_pk}'), 'quantity': quantity}
+            for product_pk, quantity in purchase.lines.items()
+        ]
+    return render(request,'loyalty/customer.html',{
+        'customer':user,'card':card,
+        'rewards':Reward.objects.filter(user=user,revoked=False).order_by('-id'),
+        'purchases':page.object_list,'page':page, 'purchase_count':history.count(),
+        'now':timezone.now(),
+    })
 @staff_required
 def sale(request,card_id):
     user=get_object_or_404(User,card_id=card_id,verified=True)

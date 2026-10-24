@@ -161,3 +161,107 @@ class StylingRegressionTests(TestCase):
         self.assertIn('.tool-card.cocoa{', css)
         self.assertFalse(re.search(r'(?:^|[},])\s*\.cocoa(?=[:{])', css),
                          'Unscoped cocoa decoration would break the admin tile')
+
+@override_settings(DEBUG=True, EMAIL_BACKEND='django.core.mail.backends.locmem.EmailBackend')
+class StaffCustomerDirectoryTests(TestCase):
+    """V2.2.1 : liste privée des clients, restrictions V2.2 conservées."""
+    def setUp(self):
+        self.staff = User.objects.create_superuser('pro@example.com', 'a-long-test-password')
+        self.customer = User.objects.create_user('camille@example.com', 'a-long-test-password',
+                                                 first_name='Camille', verified=True)
+        self.pending = User.objects.create_user('pending@example.com', 'a-long-test-password',
+                                                first_name='Lucie', verified=False)
+        self.product = Product.objects.create(name='Tiramisu vanille')
+        program = Program.objects.create(threshold=30, reward='Cadeau')
+        program.products.add(self.product)
+
+    def test_only_staff_can_see_client_details_or_directory(self):
+        endpoints = [reverse('customers'), reverse('customer', args=[self.customer.card_id]),
+                     reverse('customer', args=[self.pending.card_id])]
+        for url in endpoints:
+            self.assertEqual(self.client.get(url).status_code, 302)  # login
+        self.client.force_login(self.customer)
+        for url in endpoints:
+            self.assertEqual(self.client.get(url).status_code, 404)
+        self.client.force_login(self.staff)
+        for url in endpoints:
+            self.assertEqual(self.client.get(url).status_code, 200)
+
+    def test_directory_lists_emails_and_active_purchase_counts(self):
+        purchase = credit(self.customer, {str(self.product.pk): 2}, self.staff, uuid.uuid4())
+        ignored = credit(self.customer, {str(self.product.pk): 1}, self.staff, uuid.uuid4())
+        cancel_purchase(ignored.pk, self.staff, 'Essai à annuler')
+        self.client.force_login(self.staff)
+        response = self.client.get(reverse('customers'))
+        self.assertContains(response, 'camille@example.com')
+        self.assertContains(response, 'pending@example.com')
+        self.assertContains(response, 'E-mail à confirmer')
+        self.assertContains(response, reverse('sale', args=[self.customer.card_id]))
+        self.assertNotContains(response, reverse('sale', args=[self.pending.card_id]))
+        annotated = next(c for c in response.context['customers'] if c.pk == self.customer.pk)
+        self.assertEqual(annotated.purchase_count, 1)
+        self.assertEqual(annotated.total_stamps, purchase.stamps)
+
+    def test_search_and_pagination(self):
+        for index in range(17):
+            User.objects.create_user(f'other-{index}@example.com', 'a-long-test-password', verified=True)
+        self.client.force_login(self.staff)
+        query = self.client.get(reverse('customers'), {'q':'CaMiLlE'})
+        self.assertContains(query, 'camille@example.com')
+        self.assertNotContains(query, 'pending@example.com')
+        query = self.client.get(reverse('customers'), {'q':'PENDING@EXAMPLE.COM'})
+        self.assertContains(query, 'pending@example.com')
+        self.assertNotContains(query, 'camille@example.com')
+        page = self.client.get(reverse('customers'), {'page': 2})
+        self.assertEqual(page.status_code, 200)
+        self.assertEqual(page.context['page'].number, 2)
+
+    def test_staff_can_open_verified_customer_and_add_purchase(self):
+        self.client.force_login(self.staff)
+        page = self.client.get(reverse('customer', args=[self.customer.card_id]))
+        self.assertContains(page, 'Ajouter un achat')
+        identifier = uuid.uuid4()
+        payload = {'request_id': str(identifier), f'product_{self.product.pk}': '2'}
+        response = self.client.post(reverse('sale', args=[self.customer.card_id]), payload)
+        self.assertRedirects(response, reverse('customer', args=[self.customer.card_id]))
+        self.assertEqual(Purchase.objects.filter(user=self.customer).count(), 1)
+        customer_page = self.client.get(reverse('customer', args=[self.customer.card_id]))
+        self.assertContains(customer_page, '2 × Tiramisu vanille')
+        self.assertContains(customer_page, '2 tampon(s)')
+
+    def test_pending_customer_can_be_viewed_but_not_credited(self):
+        self.client.force_login(self.staff)
+        url = reverse('customer', args=[self.pending.card_id])
+        response = self.client.get(url)
+        self.assertContains(response, 'Adresse e-mail non confirmée')
+        self.assertNotContains(response, 'Ajouter un achat')
+        self.assertFalse(Card.objects.filter(user=self.pending).exists())
+        sale_url = reverse('sale', args=[self.pending.card_id])
+        self.assertEqual(self.client.get(sale_url).status_code, 404)
+        self.assertEqual(self.client.post(sale_url, {'request_id': str(uuid.uuid4()),
+                           f'product_{self.product.pk}': 1}).status_code, 404)
+        self.assertEqual(Purchase.objects.filter(user=self.pending).count(), 0)
+        with self.assertRaises(BusinessError):
+            credit(self.pending, {str(self.product.pk): 1}, self.staff, uuid.uuid4())
+        self.client.force_login(self.pending)
+        self.assertEqual(self.client.get(reverse('qr')).status_code, 404)
+        self.assertContains(self.client.get(reverse('dashboard')), 'Confirme ton e-mail')
+
+    def test_history_lists_all_purchases_by_pages(self):
+        for i in range(18):
+            Purchase.objects.create(id=uuid.uuid4(), user=self.customer, actor=self.staff,
+                                    lines={str(self.product.pk): i+1}, stamps=i+1)
+        self.client.force_login(self.staff)
+        url = reverse('customer', args=[self.customer.card_id])
+        first = self.client.get(url)
+        second = self.client.get(url, {'page':2})
+        self.assertEqual(first.context['page'].paginator.count, 18)
+        self.assertEqual(len(first.context['purchases']), 15)
+        self.assertEqual(len(second.context['purchases']), 3)
+        self.assertContains(second, 'Tiramisu vanille')
+
+    def test_staff_index_has_clear_clients_entry(self):
+        self.client.force_login(self.staff)
+        response = self.client.get(reverse('staff'))
+        self.assertContains(response, reverse('customers'))
+        self.assertContains(response, 'Liste des clients')
