@@ -264,7 +264,9 @@ class StaffCustomerDirectoryTests(TestCase):
         self.client.force_login(self.staff)
         response = self.client.get(reverse('staff'))
         self.assertContains(response, reverse('customers'))
-        self.assertContains(response, 'Liste des clients')
+        # Le lien vers l'annuaire doit rester visible dans la refonte V2.2.2.
+        # L'ancien libellé « Liste des clients » n'est plus affiché.
+        self.assertContains(response, 'Fiches & historique')
 
 
 @override_settings(DEBUG=True, EMAIL_BACKEND='django.core.mail.backends.locmem.EmailBackend')
